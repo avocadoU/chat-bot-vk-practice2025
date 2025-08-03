@@ -4,148 +4,41 @@ import okhttp3.*;
 import okhttp3.logging.HttpLoggingInterceptor;
 import com.google.gson.*;
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 public class VkBot {
-    private static final String ACCESS_TOKEN = "vk1.a.VTs35iuWFmwtrm6FCpJ4TyvdCJLyGw3EW2_7APUobOSbbj7D69UnQMG65wwQkOZm5IhMs9H-j3ZbKeAjZFda3cljQHgYKk96JjECjv9F6jErHbBwU1D6Mrdu_zrqaShG2EI04ozJJPRPdQkiVMNbGCkVLF_pXlRd8TyKCBmoQ3FaAdNGdNAK21KCQxtshDwaGfnNn294TrbskVeX42TwkQ";
-    private static final int GROUP_ID = 231879059;
-    private static final String VK_API_VERSION = "5.199";
-
-    private static final OkHttpClient client = new OkHttpClient.Builder()
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
-            .addInterceptor(new HttpLoggingInterceptor(message -> System.out.println("NET: " + message)))
-            .build();
+    private static final OkHttpClient client = Connection.client;
+    private static final String ACCESS_TOKEN = Connection.ACCESS_TOKEN;
+    private static final int GROUP_ID = Connection.GROUP_ID;
+    private static final String VK_API_VERSION = Connection.VK_API_VERSION;
 
     public static void startLongPoll() {
-        System.out.println("VK Bot запущен");
+        System.out.println("\u001B[32m╔════════════════════════════╗");
+        System.out.println("\u001B[32m║   VK Bot успешно запущен!  ║");
+        System.out.println("\u001B[32m╚════════════════════════════╝\u001B[0m");
 
-        while (true) {
-            try {
-                JsonObject serverData = getServerData();
-                String server = serverData.get("server").getAsString();
-                String key = serverData.get("key").getAsString();
-                String ts = serverData.get("ts").getAsString();
-
-                // Основной цикл Long Poll
-                while (true) {
-                    try {
-                        String url = String.format("%s?act=a_check&key=%s&ts=%s&wait=25",
-                                server, key, ts);
-
-                        Request request = new Request.Builder()
-                                .url(url)
-                                .build();
-
-                        try (Response response = client.newCall(request).execute()) {
-                            if (!response.isSuccessful()) {
-                                throw new IOException("HTTP error: " + response.code());
-                            }
-
-                            String json = response.body().string();
-                            JsonObject update = JsonParser.parseString(json).getAsJsonObject();
-
-                            // Обработка ошибок Long Poll
-                            if (update.has("failed")) {
-                                handleLongPollError(update.get("failed").getAsInt());
-                                break;
-                            }
-
-                            // Обновление TS
-                            ts = update.get("ts").getAsString();
-
-                            // Обработка сообщений
-                            if (update.has("updates")) {
-                                for (JsonElement element : update.getAsJsonArray("updates")) {
-                                    processUpdate(element.getAsJsonObject());
-                                }
-                            }
-                        }
-                    } catch (IOException e) {
-                        System.err.println("Ошибка соединения: " + e.getMessage());
-                        sleep(5000);
-                        break;
-                    }
-                }
-            } catch (Exception e) {
-                System.err.println("Критическая ошибка: " + e.getMessage());
-                sleep(15000);
-            }
-        }
+        Connection.startLongPoll();
     }
 
-    private static void handleLongPollError(int errorCode) throws IOException {
-        switch (errorCode) {
-            case 1:
-                System.out.println("Long Poll: Нужно обновить TS");
-                break;
-            case 2:
-                throw new IOException("Long Poll: Нужен новый ключ");
-            case 3:
-                throw new IOException("Long Poll: Нужен новый сервер");
-            default:
-                throw new IOException("Long Poll: Неизвестная ошибка " + errorCode);
+    protected static void processUpdate(JsonObject update) {
+        if (!"message_new".equals(update.get("type").getAsString())) return;
+
+        JsonObject msg = update.getAsJsonObject("object").getAsJsonObject("message");
+        int peerId = msg.get("peer_id").getAsInt();
+        String text = msg.get("text").getAsString().toLowerCase().trim();
+
+        String senderInfo = getSenderName(peerId);
+        System.out.println("\u001B[33mНовое сообщение от " + senderInfo + ": " + text);
+
+        if (text.equalsIgnoreCase("Начать") || text.equalsIgnoreCase("/start")) {
+            sendWelcomeMessage(peerId);
+        } else if (text.equalsIgnoreCase("проекты")) {
+            return;
+        } else {
+            sendMessage(peerId, "⚠️ Неизвестная команда");
         }
-    }
 
-    private static void processUpdate(JsonObject update) {
-        if ("message_new".equals(update.get("type").getAsString())) {
-            JsonObject msg = update.getAsJsonObject("object").getAsJsonObject("message");
-            int peerId = msg.get("peer_id").getAsInt();
-            String text = msg.get("text").getAsString();
-
-            // Получаем информацию об отправителе
-            String senderInfo = getSenderInfo(peerId);
-
-            System.out.println("Новое сообщение от " + senderInfo + ": " + text);
-
-            // Улучшенный ответ
-            String response = String.format(
-                    "🔹 %s написал: \n%s",
-                    senderInfo,
-                    text);
-
-            sendMessage(peerId, response);
-        }
-    }
-
-    private static String getSenderInfo(int userId) {
-        try {
-            String url = String.format(
-                    "https://api.vk.com/method/users.get?user_ids=%d&fields=first_name,last_name&access_token=%s&v=%s",
-                    userId, ACCESS_TOKEN, VK_API_VERSION
-            );
-
-            Request request = new Request.Builder().url(url).build();
-            try (Response response = client.newCall(request).execute()) {
-                JsonObject obj = JsonParser.parseString(response.body().string()).getAsJsonObject();
-                JsonObject user = obj.getAsJsonArray("response").get(0).getAsJsonObject();
-                return user.get("first_name").getAsString() + " " + user.get("last_name").getAsString();
-            }
-        } catch (Exception e) {
-            return "Пользователь";
-        }
-    }
-
-    private static JsonObject getServerData() throws IOException {
-        String url = String.format(
-                "https://api.vk.com/method/groups.getLongPollServer?group_id=%d&access_token=%s&v=%s",
-                GROUP_ID, ACCESS_TOKEN, VK_API_VERSION
-        );
-
-        Request request = new Request.Builder().url(url).build();
-        try (Response response = client.newCall(request).execute()) {
-            String json = response.body().string();
-            JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
-
-            if (obj.has("error")) {
-                throw new IOException("API error: " +
-                        obj.getAsJsonObject("error").get("error_msg").getAsString());
-            }
-
-            return obj.getAsJsonObject("response");
-        }
     }
 
     private static void sendMessage(int peerId, String text) {
@@ -166,11 +59,34 @@ public class VkBot {
         }
     }
 
-    private static void sleep(long millis) {
+    private static void sendWelcomeMessage(int peerId) {
+        String msg = String.format("Привет, %s!<br>Я помогу тебе разобраться с VK Education Projects \uD83C\uDF1F<br>" +
+                        "Здесь ты найдешь ответы на свои вопросы",
+                getSenderName(peerId));
+        sendMessage(peerId, msg);
+
+        Connection.sleep(600);
+
+        msg = "VK Education Projects — витрина проектов для студентов. " +
+              "Проекты могут быть использованы для выполнения домашних заданий, научно-исследовательских, курсовых и дипломных работ";
+        sendMessage(peerId, msg);
+    }
+
+    private static String getSenderName(int userId) {
         try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            String url = String.format(
+                    "https://api.vk.com/method/users.get?user_ids=%d&fields=first_name,last_name&access_token=%s&v=%s",
+                    userId, ACCESS_TOKEN, VK_API_VERSION
+            );
+
+            Request request = new Request.Builder().url(url).build();
+            try (Response response = client.newCall(request).execute()) {
+                JsonObject obj = JsonParser.parseString(response.body().string()).getAsJsonObject();
+                JsonObject user = obj.getAsJsonArray("response").get(0).getAsJsonObject();
+                return user.get("first_name").getAsString();
+            }
+        } catch (Exception e) {
+            return "Пользователь";
         }
     }
 }
