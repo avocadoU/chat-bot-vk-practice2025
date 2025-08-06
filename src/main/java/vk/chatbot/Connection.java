@@ -24,6 +24,8 @@ public class Connection {
             .build();
 
     public static void startLongPoll() {
+        // SiteAnalyzer.setup(); // Удалить или реализовать этот метод, если нужен
+
         while (true) {
             try {
                 JsonObject serverData = getServerData();
